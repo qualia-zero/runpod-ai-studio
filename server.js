@@ -88,9 +88,11 @@ async function executeRestV2(endpoint, method = 'GET', body = null, apiKey = '')
   const text = await response.text();
 
   if (!response.ok) {
-    // 409 Conflict: action "start" is not valid for status "RUNNING" -> Treat as success
+    // 409 Conflict: action not valid for current status (e.g. stop when already EXITED or start when RUNNING)
     if (response.status === 409) {
-      return { status: 'RUNNING', desiredStatus: 'RUNNING' };
+      const isStart = body && body.action === 'start';
+      const targetStatus = isStart ? 'RUNNING' : 'STOPPED';
+      return { status: targetStatus, desiredStatus: targetStatus };
     }
 
     let detailMsg = '';
@@ -217,12 +219,12 @@ app.get('/api/runpod/pods', async (req, res) => {
         rawModelTag,
         status,
         desiredStatus,
-        gpuType: pod.gpuType || pod.gpus?.[0]?.id || pod.machine?.gpuDisplayName || 'NVIDIA GPU',
+        gpuType: pod.gpu?.id || pod.gpuType || pod.gpus?.[0]?.id || pod.machine?.gpuDisplayName || 'NVIDIA GPU',
         cpuPercent: pod.runtime?.container?.cpuPercent || pod.cpuPercent || 0,
         memoryPercent: pod.runtime?.container?.memoryPercent || pod.memoryPercent || 0,
-        uptimeInSeconds: pod.runtime?.uptimeInSeconds || pod.uptimeInSeconds || 0,
-        imageName: pod.imageName || 'runpod/default',
-        costPerHr: pod.costPerHr || pod.gpus?.[0]?.costPerHr || 0
+        uptimeInSeconds: pod.runtime?.uptime || pod.runtime?.uptimeInSeconds || pod.uptimeInSeconds || 0,
+        imageName: pod.image || pod.imageName || 'runpod/default',
+        costPerHr: pod.cost || pod.costPerHr || pod.gpus?.[0]?.costPerHr || 0
       };
     }));
 
@@ -383,7 +385,7 @@ app.post('/api/runpod/pod/start', async (req, res) => {
   }
 
   try {
-    const restData = await executeRestV2(`/pods/${podId}/start`, 'POST', null, apiKey);
+    const restData = await executeRestV2(`/pods/${podId}/action`, 'POST', { action: 'start' }, apiKey);
     const desiredStatus = (restData.desiredStatus || restData.status || 'RUNNING').toUpperCase();
     const status = normalizePodStatus(desiredStatus, restData.status);
 
@@ -397,14 +399,35 @@ app.post('/api/runpod/pod/start', async (req, res) => {
       simulated: false
     });
   } catch (restErr) {
-    logRAW('WARN', `Start-Signal fehlgeschlagen für Pod ${podId}: ${restErr.message}`);
-    return res.json({
-      success: false,
-      status: 'STOPPED',
-      podId,
-      simulated: false,
-      error: restErr.message
-    });
+    // Fallback: GraphQL podResume mutation if REST v2 fails
+    try {
+      const gqlResult = await executeGraphQL(`
+        mutation PodResume($podId: String!) {
+          podResume(input: { podId: $podId, gpuCount: 1 }) {
+            id
+            desiredStatus
+          }
+        }
+      `, { podId }, apiKey);
+      logRAW('SYS', `Start-Signal (GraphQL Fallback) gesendet an Pod ${podId}`);
+      return res.json({
+        success: true,
+        status: 'RUNNING',
+        desiredStatus: 'RUNNING',
+        podId,
+        data: gqlResult,
+        simulated: false
+      });
+    } catch (gqlErr) {
+      logRAW('WARN', `Start-Signal fehlgeschlagen für Pod ${podId}: ${restErr.message}`);
+      return res.json({
+        success: false,
+        status: 'STOPPED',
+        podId,
+        simulated: false,
+        error: restErr.message
+      });
+    }
   }
 });
 
@@ -423,7 +446,7 @@ async function stopAllActivePods(apiKey, res) {
     const rawPods = Array.isArray(podsData) ? podsData : (podsData.items || podsData.pods || []);
     runningPods = rawPods.filter(p => {
       const s = (p.desiredStatus || p.status || '').toUpperCase();
-      return s === 'RUNNING' || s === 'STARTING' || s === 'PAUSED';
+      return s === 'RUNNING' || s === 'STARTING' || s === 'PAUSED' || s === 'PROVISIONING';
     }).map(p => ({ id: p.id, name: p.name || p.id }));
   } catch (restErr) {
     console.warn('[Stop-All] REST v2 fetch pods failed, trying GraphQL fallback:', restErr.message);
@@ -442,7 +465,7 @@ async function stopAllActivePods(apiKey, res) {
       const rawPods = gqlData?.myself?.pods || [];
       runningPods = rawPods.filter(p => {
         const s = (p.desiredStatus || '').toUpperCase();
-        return s === 'RUNNING' || s === 'STARTING' || s === 'PAUSED';
+        return s === 'RUNNING' || s === 'STARTING' || s === 'PAUSED' || s === 'PROVISIONING';
       }).map(p => ({ id: p.id, name: p.name || p.id }));
     } catch (gqlErr) {
       console.warn('[Stop-All] GraphQL fetch pods also failed:', gqlErr.message);
@@ -457,12 +480,12 @@ async function stopAllActivePods(apiKey, res) {
   let stoppedCount = 0;
   for (const p of runningPods) {
     let stopped = false;
-    // Try REST v2 stop
+    // Primary: REST v2 /pods/{id}/action with action: 'stop'
     try {
-      await executeRestV2(`/pods/${p.id}/stop`, 'POST', null, apiKey);
+      await executeRestV2(`/pods/${p.id}/action`, 'POST', { action: 'stop' }, apiKey);
       stopped = true;
     } catch (e) {
-      // Try GraphQL podStop mutation
+      // Fallback: GraphQL podStop mutation
       try {
         await executeGraphQL(`
           mutation PodStop($podId: String!) {
@@ -498,7 +521,7 @@ app.post('/api/runpod/pod/stop', async (req, res) => {
   }
 
   try {
-    const restData = await executeRestV2(`/pods/${podId}/stop`, 'POST', null, apiKey);
+    const restData = await executeRestV2(`/pods/${podId}/action`, 'POST', { action: 'stop' }, apiKey);
     const desiredStatus = (restData.desiredStatus || restData.status || 'STOPPED').toUpperCase();
     const status = normalizePodStatus(desiredStatus, restData.status);
 
