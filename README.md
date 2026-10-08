@@ -81,4 +81,4 @@ Die Anwendung ist anschließend unter **`http://localhost:5173`** erreichbar.
 
 ## 📄 Lizenz
 
-Dieses Projekt ist unter der [MIT-Lizenz](LICENSE) lizenziert.
+Dieses Projekt ist unter der [GNU General Public License v3.0](LICENSE) lizenziert.

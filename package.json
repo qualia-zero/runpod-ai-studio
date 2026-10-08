@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "description": "Elegante Chat-Oberfläche für Runpod-LLMs mit Notfall-Stopp für aktive Instanzen",
   "author": "qualia-zero",
-  "license": "MIT",
+  "license": "GPL-3.0-or-later",
   "type": "module",
   "scripts": {
     "dev": "concurrently \"node server.js\" \"vite --host\"",
