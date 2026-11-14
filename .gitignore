@@ -1,20 +1,29 @@
-# Dependencies
-node_modules/
-
-# Production build output
-dist/
-dist-ssr/
-*.local
-
-# Environment variables & secrets
+# ==============================================================================
+# Secrets, Credentials & Signing Keys (NEVER commit)
+# ==============================================================================
 .env
 .env.*
 *.env
 !.env.example
+keystore/
 *.keystore
 *.jks
 
-# Log files
+# ==============================================================================
+# Build Outputs, Dependencies & Caches (reproducible via build)
+# ==============================================================================
+node_modules/
+dist/
+dist-ssr/
+*.local
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+
+# ==============================================================================
+# Logs & Runtime Data
+# ==============================================================================
 logs/
 *.log
 npm-debug.log*
@@ -23,7 +32,9 @@ yarn-error.log*
 pnpm-debug.log*
 lerna-debug.log*
 
-# Editor & IDE files
+# ==============================================================================
+# IDEs, Editors & OS Files
+# ==============================================================================
 .idea/
 *.iml
 *.ipr
@@ -31,14 +42,10 @@ lerna-debug.log*
 .vscode/*
 !.vscode/extensions.json
 *.sw?
-*.suo
-*.ntvs*
-*.njsproj
-*.sln
-
-# OS generated files
 .DS_Store
 Thumbs.db
 
-# Local AI / agent rules
+# ==============================================================================
+# Local AI / Agent Instructions
+# ==============================================================================
 GEMINI.md
